@@ -20,6 +20,7 @@ services:
 
   app:
     image: nextcloud:apache
+    container_name: nextcloud
     restart: always
     volumes:
       - nextcloud:/var/www/html:z
@@ -50,6 +51,7 @@ services:
 
   proxy:
     build: ./proxy
+    container_name: proxy
     restart: always
     ports:
       - 80:80
@@ -57,22 +59,23 @@ services:
     labels:
       com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy: "true"
     volumes:
-      - certs:/etc/nginx/certs:z,ro
-      - vhost.d:/etc/nginx/vhost.d:z
-      - html:/usr/share/nginx/html:z
+      - proxy-certs:/etc/nginx/certs:z,ro
+      - proxy-vhost.d:/etc/nginx/vhost.d:z
+      - proxy-html:/usr/share/nginx/html:z
       - /var/run/docker.sock:/tmp/docker.sock:z,ro
     networks:
       - proxy-tier
 
   letsencrypt-companion:
     image: nginxproxy/acme-companion
+    container_name: letsencrypt
     restart: always
     volumes:
-      - certs:/etc/nginx/certs:z
-      - acme:/etc/acme.sh:z
-      - vhost.d:/etc/nginx/vhost.d:z
-      - html:/usr/share/nginx/html:z
+      - proxy-certs:/etc/nginx/certs:z
+      - proxy-vhost.d:/etc/nginx/vhost.d:z
+      - proxy-html:/usr/share/nginx/html:z
       - /var/run/docker.sock:/var/run/docker.sock:z,ro
+      - letsencrypt:/etc/acme.sh:z
     networks:
       - proxy-tier
     depends_on:
@@ -93,13 +96,36 @@ services:
 #    networks:
 #      - proxy-tier
 
+  collabora:
+    image: collabora/code
+    container_name: collabora
+    restart: always
+    networks:
+      - proxy-tier
+    depends_on:
+      - proxy
+    cap_add:
+     - MKNOD
+    ports:
+      - 127.0.0.1:9980:9980
+    environment:
+      # IMPORTANT: Note the backslashs before the dots here (and only here)!
+      - domain=[##mynextcloud\.mooo\.com##]
+      - username=admin
+      - password=[##A SECURE GENERATED PASSWORD##]
+      - VIRTUAL_HOST=[##myoffice.mooo.com##]
+      - LETSENCRYPT_HOST=[##myoffice.mooo.com##]
+      - VIRTUAL_NETWORK=proxy-tier
+      - VIRTUAL_PORT=9980
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true
+
 volumes:
-  db:
-  nextcloud:
-  certs:
-  acme:
-  vhost.d:
-  html:
+  nextcloud-db:
+  nextcloud-data:
+  proxy-certs:
+  proxy-vhost.d:
+  proxy-html:
+  letsencrypt:
 
 networks:
   proxy-tier:
