@@ -25,9 +25,9 @@ services:
     volumes:
       - nextcloud:/var/www/html:z
     environment:
-      - VIRTUAL_HOST=
-      - LETSENCRYPT_HOST=
-      - LETSENCRYPT_EMAIL=
+      - VIRTUAL_HOST=nextqloud.mooo.com
+      - LETSENCRYPT_HOST=nextqloud.mooo.com
+      - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
       - MYSQL_HOST=db
       - REDIS_HOST=redis
     env_file:
@@ -110,11 +110,11 @@ services:
       - 127.0.0.1:9980:9980
     environment:
       # IMPORTANT: Note the backslashs before the dots here (and only here)!
-      - domain=[##mynextcloud\.mooo\.com##]
+      - domain=nextqloud.mooo.com
       - username=admin
-      - password=[##A SECURE GENERATED PASSWORD##]
-      - VIRTUAL_HOST=[##myoffice.mooo.com##]
-      - LETSENCRYPT_HOST=[##myoffice.mooo.com##]
+      - password=4e3681adeffef0792233bc311c51fdf3130bb0eca2f65619bbb2b913d876fcae
+      - VIRTUAL_HOST=officeqloud.mooo.com
+      - LETSENCRYPT_HOST=officeqloud.mooo.com
       - VIRTUAL_NETWORK=proxy-tier
       - VIRTUAL_PORT=9980
       - extra_params=--o:ssl.enable=false --o:ssl.termination=true
