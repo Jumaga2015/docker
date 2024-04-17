@@ -19,6 +19,8 @@ services:
     image: redis:alpine
     container_name: redis
     restart: always
+    volumes:
+      - redis-data:/data
 
   app:
     image: nextcloud:apache
@@ -30,8 +32,14 @@ services:
       - VIRTUAL_HOST=nextqloud.mooo.com
       - LETSENCRYPT_HOST=nextqloud.mooo.com
       - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
+
       - MYSQL_HOST=db
       - REDIS_HOST=redis
+
+      - TRUSTED_PROXIES=proxy
+      - OVERWRITECLIURL=https://nextqloud.mooo.com
+      - OVERWRITEPROTOCOL=https
+      - OVERWRITEHOST=nextqloud.mooo.com  
     env_file:
       - db.env
     depends_on:
@@ -121,6 +129,30 @@ services:
       - VIRTUAL_NETWORK=proxy-tier
       - VIRTUAL_PORT=9980
       - extra_params=--o:ssl.enable=false --o:ssl.termination=true
+    #En nextcloud configuración office, poner este host <https://officeqloud.mooo.com>
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    restart: always  
+    ports:
+      - 3478:3478
+      - 3478:3478/udp
+      - 5349:5349
+      - 5349:5349/udp
+      - 49100-49200:49100-49200/udp
+   volumes:
+      - coturn-data:/var/lib/coturn
+   command: --log-file=stdout --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --realm=emvudotracks.duckdns.org --total-quota=100
+   depends_on:
+      - redis
+
+  cloudflare-ddns:
+    environment:
+      - API_KEY=1O0DEillqBQ2LqT-9TBnVBCO5ZJmATC_bwZiEKs-
+      - ZONE=qloudserver.es
+      - SUBDOMAIN=mail
+    image: oznu/cloudflare-ddns
 
 volumes:
   nextcloud-db:
@@ -129,6 +161,9 @@ volumes:
   proxy-vhost.d:
   proxy-html:
   letsencrypt:
+  redis-data:
+    driver: local
+  coturn-data:
 
 networks:
   proxy-tier:
