@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   db:
     image: mariadb:10.6
@@ -66,6 +64,8 @@ services:
     restart: always
     ports:
       - 80:80
+      # you can remove port 81 after you have HTTPS setup to your Nginx Proxy Manager admin page
+      - 81:81
       - 443:443
     labels:
       com.github.jrcs.letsencrypt_nginx_proxy_companion.nginx_proxy: "true"
@@ -141,18 +141,60 @@ services:
       - 5349:5349
       - 5349:5349/udp
       - 49100-49200:49100-49200/udp
-   volumes:
+    volumes:
       - coturn-data:/var/lib/coturn
-   command: --log-file=stdout --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --realm=emvudotracks.duckdns.org --total-quota=100
-   depends_on:
+    command: --log-file=stdout --realm=nextqloud.mooo.com --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --total-quota=100
+    depends_on:
       - redis
 
   cloudflare-ddns:
+    container_name: cloudflare-ddns
     environment:
       - API_KEY=1O0DEillqBQ2LqT-9TBnVBCO5ZJmATC_bwZiEKs-
       - ZONE=qloudserver.es
       - SUBDOMAIN=mail
     image: oznu/cloudflare-ddns
+
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    container_name: mailserver
+    # Provide the FQDN of your mail server here (Your DNS MX record should point to this value)
+    hostname: mail.qloudserver.es
+    environment:
+      # SSL_TYPE:         Uses the `letsencrypt` method to find mounted certificates.
+      # VIRTUAL_HOST:     The FQDN that `nginx-proxy` will configure itself to handle for HTTP[S] connections.
+      # LETSENCRYPT_HOST: The FQDN for a certificate that `acme-companion` will provision and renew.
+      - SSL_TYPE=letsencrypt
+      - VIRTUAL_HOST=mail.qloudserver.es
+      - LETSENCRYPT_HOST=mail.qloudserver.es    
+    env_file: mailserver.env
+    # More information about the mail-server ports:
+    # https://docker-mailserver.github.io/docker-mailserver/latest/config/security/understanding-the-ports/
+    # To avoid conflicts with yaml base-60 float, DO NOT remove the quotation marks.
+    ports:
+      - "25:25"    # SMTP  (explicit TLS => STARTTLS, Authentication is DISABLED => use port 465/587 instead)
+      - "143:143"  # IMAP4 (explicit TLS => STARTTLS)
+      - "465:465"  # ESMTP (implicit TLS)
+      - "587:587"  # ESMTP (explicit TLS => STARTTLS)
+      - "993:993"  # IMAP4 (implicit TLS)
+    volumes:
+      - dms-mail-data:/var/mail/
+      - dms-mail-state:/var/mail-state/
+      - dms-mail-logs:/var/log/mail/
+      - dms-config:/tmp/docker-mailserver/
+      - /etc/localtime:/etc/localtime:ro
+      - proxy-certs:/etc/letsencrypt/live/:ro
+    networks:
+      - proxy-tier
+    restart: always
+    stop_grace_period: 1m
+    # Uncomment if using `ENABLE_FAIL2BAN=1`:
+    # cap_add:
+    #   - NET_ADMIN
+    healthcheck:
+      test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
+      timeout: 3s
+      retries: 0
 
 volumes:
   nextcloud-db:
@@ -164,6 +206,10 @@ volumes:
   redis-data:
     driver: local
   coturn-data:
+  dms-mail-data:
+  dms-mail-state:
+  dms-mail-logs:
+  dms-config:
 
 networks:
   proxy-tier:
