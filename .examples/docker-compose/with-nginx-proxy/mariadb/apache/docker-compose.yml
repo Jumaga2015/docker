@@ -35,7 +35,7 @@ services:
       - openldap-slapd-database:/var/lib/ldap
       - openldap-slapd-config:/etc/ldap/slapd.d
     environment: 
-      - LDAP_ORGANISATION=qloudserver
+      - LDAP_ORGANISATION=QCorporation
       - LDAP_DOMAIN=qloudserver.es
       - LDAP_ADMIN_USERNAME=admin
       - LDAP_ADMIN_PASSWORD=qloud
@@ -66,6 +66,35 @@ services:
     networks:
       - openldap
 
+  ldap-user-manager:
+    image: wheelybird/ldap-user-manager:v1.11  
+    container_name: lumqloud
+    restart: always    
+    #Sin proxy descomentar
+    #ports: 
+    #    - 80:80
+    #    - 443:443
+    environment:
+        - VIRTUAL_HOST=lumqloud.qloudserver.es
+        - LETSENCRYPT_HOST=lumqloud.qloudserver.es
+        - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
+
+        - SERVER_HOSTNAME=openldap
+        - NO_HTTPS=TRUE
+        - LDAP_URI=ldap://openldap
+        - LDAP_BASE_DN=dc=qloudserver,dc=es
+        - LDAP_REQUIRE_STARTTLS=FALSE
+        - LDAP_ADMINS_GROUP=admins
+        - LDAP_ADMIN_BIND_DN=cn=admin,dc=qloudserver,dc=es
+        - LDAP_ADMIN_BIND_PWD=qloud
+        - LDAP_IGNORE_CERT_ERRORS=true
+        - EMAIL_DOMAIN=qloudserver.es
+    depends_on:
+      - openldap
+    networks:
+      - proxy-tier    
+      - openldap
+      
   app:
     image: nextcloud:apache
     container_name: nextcloud
@@ -73,17 +102,17 @@ services:
     volumes:
       - nextcloud-data:/var/www/html:z
     environment:
-      - VIRTUAL_HOST=nextqloud.mooo.com
-      - LETSENCRYPT_HOST=nextqloud.mooo.com
+      - VIRTUAL_HOST=nextqloud.qloudserver.es
+      - LETSENCRYPT_HOST=nextqloud.qloudserver.es
       - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
 
       - MYSQL_HOST=db
       - REDIS_HOST=redis
 
       - TRUSTED_PROXIES=proxy
-      - OVERWRITECLIURL=https://nextqloud.mooo.com
+      - OVERWRITECLIURL=https://nextqloud.qloudserver.es
       - OVERWRITEPROTOCOL=https
-      - OVERWRITEHOST=nextqloud.mooo.com  
+      - OVERWRITEHOST=nextqloud.qloudserver.es  
     env_file:
       - db.env
     depends_on:
@@ -167,15 +196,15 @@ services:
       - 127.0.0.1:9980:9980
     environment:
       # IMPORTANT: Note the backslashs before the dots here (and only here)!
-      - domain=nextqloud.mooo.com
+      - domain=nextqloud.qloudserver.es
       - username=admin
       - password=QCorporation#3
-      - VIRTUAL_HOST=officeqloud.mooo.com
-      - LETSENCRYPT_HOST=officeqloud.mooo.com
+      - VIRTUAL_HOST=officeqloud.qloudserver.es
+      - LETSENCRYPT_HOST=officeqloud.qloudserver.es
       - VIRTUAL_NETWORK=proxy-tier
       - VIRTUAL_PORT=9980
       - extra_params=--o:ssl.enable=false --o:ssl.termination=true
-    #En nextcloud configuración office, poner este host <https://officeqloud.mooo.com>
+    #En nextcloud configuración office, poner este host <https://officeqloud.qloudserver.es>
 
   coturn:
     image: coturn/coturn:latest
@@ -189,7 +218,7 @@ services:
       - 49100-49200:49100-49200/udp
     volumes:
       - coturn-data:/var/lib/coturn
-    command: --log-file=stdout --realm=nextqloud.mooo.com --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --total-quota=100
+    command: --log-file=stdout --realm=nextqloud.qloudserver.es --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --total-quota=100
     depends_on:
       - redis
 
