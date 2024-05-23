@@ -26,6 +26,7 @@ services:
   openldap:
     image: osixia/openldap:latest
     container_name: openldap
+    restart: always
     hostname: openldap
     ports: 
       - "389:389"
@@ -45,6 +46,9 @@ services:
       - LDAP_TLS_CRT_FILENAME=server.crt
       - LDAP_TLS_KEY_FILENAME=server.key
       - LDAP_TLS_CA_CRT_FILENAME=qloudserver.es.ca.crt
+      - LDAP_REQUIRE_STARTTLS=TRUE
+      - LDAP_TLS_VERIFY_CLIENT=never
+
       - LDAP_READONLY_USER=true
       - LDAP_READONLY_USER_USERNAME=user-ro
       - LDAP_READONLY_USER_PASSWORD=qloud
@@ -58,6 +62,8 @@ services:
     hostname: phpldapadmin
     ports: 
       - "9080:80"
+    volumes:
+      - phpldapadmin-data:/var/www/phpldapadmin      
     environment: 
       - PHPLDAPADMIN_LDAP_HOSTS=openldap
       - PHPLDAPADMIN_HTTPS=false
@@ -66,36 +72,107 @@ services:
     networks:
       - openldap
 
-  ldap-user-manager:
+  lumqloud:
     image: wheelybird/ldap-user-manager:v1.11  
     container_name: lumqloud
-    restart: always    
+    restart: always
+    volumes:
+      - openldap-certificates:/container/service/slapd/assets/certs:ro
     #Sin proxy descomentar
     #ports: 
     #    - 80:80
     #    - 443:443
     environment:
-        - VIRTUAL_HOST=lumqloud.qloudserver.es
-        - LETSENCRYPT_HOST=lumqloud.qloudserver.es
-        - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
+      - VIRTUAL_HOST=lumqloud.qloudserver.es
+      - LETSENCRYPT_HOST=lumqloud.qloudserver.es
+      - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
 
-        - SERVER_HOSTNAME=openldap
-        - NO_HTTPS=TRUE
-        - LDAP_URI=ldap://openldap
-        - LDAP_BASE_DN=dc=qloudserver,dc=es
-        - LDAP_REQUIRE_STARTTLS=FALSE
-        - LDAP_ADMINS_GROUP=admins
-        - LDAP_ADMIN_BIND_DN=cn=admin,dc=qloudserver,dc=es
-        - LDAP_ADMIN_BIND_PWD=qloud
-        - LDAP_IGNORE_CERT_ERRORS=true
-        - EMAIL_DOMAIN=qloudserver.es
+      - NO_HTTPS=TRUE
+
+      - SERVER_HOSTNAME=openldap.qloudserver.es
+      - LDAP_URI=ldaps://openldap
+      - LDAP_BASE_DN=dc=qloudserver,dc=es
+      - LDAP_ADMINS_GROUP=admins
+      - LDAP_ADMIN_BIND_DN=cn=admin,dc=qloudserver,dc=es
+      - LDAP_ADMIN_BIND_PWD=qloud
+
+      - LDAP_REQUIRE_STARTTLS=TRUE
+      - LDAP_IGNORE_CERT_ERRORS=TRUE
+
+      - EMAIL_DOMAIN=qloudserver.es
     depends_on:
       - openldap
     networks:
       - proxy-tier    
       - openldap
-      
-  app:
+
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    container_name: mailserver
+    restart: always
+    # Provide the FQDN of your mail server here (Your DNS MX record should point to this value)
+    hostname: mail.qloudserver.es
+    environment:
+      # SSL_TYPE:         Uses the `letsencrypt` method to find mounted certificates.
+      # VIRTUAL_HOST:     The FQDN that `nginx-proxy` will configure itself to handle for HTTP[S] connections.
+      # LETSENCRYPT_HOST: The FQDN for a certificate that `acme-companion` will provision and renew.
+      - SSL_TYPE=letsencrypt
+      - VIRTUAL_HOST=mail.qloudserver.es
+      - LETSENCRYPT_HOST=mail.qloudserver.es    
+
+      # >>> Postfix LDAP Integration
+      - ACCOUNT_PROVISIONER=LDAP
+      - LDAP_SERVER_HOST=ldaps://openldap
+      - LDAP_BIND_DN=cn=admin,dc=qloudserver,dc=es
+      - LDAP_BIND_PW=qloud
+      - LDAP_SEARCH_BASE=dc=qloudserver,dc=es
+      - LDAP_QUERY_FILTER_DOMAIN=(|(mail=*@%s)(mailAlias=*@%s)(mailGroupMember=*@%s))
+      - LDAP_QUERY_FILTER_USER=(&(objectClass=inetOrgPerson)(mail=%s))
+      - LDAP_QUERY_FILTER_ALIAS=(&(objectClass=inetOrgPerson)(mailAlias=%s))
+      - LDAP_QUERY_FILTER_GROUP=(&(objectClass=inetOrgPerson)(mailGroupMember=%s))
+      - LDAP_QUERY_FILTER_SENDERS=(&(objectClass=inetOrgPerson)(|(mail=%s)(mailAlias=%s)(mailGroupMember=%s)))
+      - SPOOF_PROTECTION=1
+
+      # >>> Dovecot LDAP Integration
+      - DOVECOT_USER_FILTER=(&(objectClass=inetOrgPerson)(mail=%u))
+      - DOVECOT_PASS_ATTRS=uid=user,userPassword=password
+      - DOVECOT_USER_ATTRS==home=/var/mail/%{ldap:uid},=mail=maildir:~/Maildir,uidNumber=uid,gidNumber=gid
+
+      # >>> SASL LDAP Authentication
+      - ENABLE_SASLAUTHD=1
+      - SASLAUTHD_MECHANISMS=ldap
+      - SASLAUTHD_LDAP_FILTER=(&(mail=%U@qloudserver.es)(objectClass=inetOrgPerson))
+
+    env_file: mailserver.env
+    # More information about the mail-server ports:
+    # https://docker-mailserver.github.io/docker-mailserver/latest/config/security/understanding-the-ports/
+    # To avoid conflicts with yaml base-60 float, DO NOT remove the quotation marks.
+    ports:
+      - "25:25"    # SMTP  (explicit TLS => STARTTLS, Authentication is DISABLED => use port 465/587 instead)
+      - "143:143"  # IMAP4 (explicit TLS => STARTTLS)
+      - "465:465"  # ESMTP (implicit TLS)
+      - "587:587"  # ESMTP (explicit TLS => STARTTLS)
+      - "993:993"  # IMAP4 (implicit TLS)
+    volumes:
+      - dms-mail-data:/var/mail/
+      - dms-mail-state:/var/mail-state/
+      - dms-mail-logs:/var/log/mail/
+      - dms-config:/tmp/docker-mailserver/
+      - /etc/localtime:/etc/localtime:ro
+      - proxy-certs:/etc/letsencrypt/live/:ro
+    stop_grace_period: 1m
+    # Uncomment if using `ENABLE_FAIL2BAN=1`:
+    # cap_add:
+    #   - NET_ADMIN
+    healthcheck:
+      test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
+      timeout: 3s
+      retries: 0
+    networks:
+      - proxy-tier
+
+
+  nextcloud:
     image: nextcloud:apache
     container_name: nextcloud
     restart: always
@@ -118,6 +195,7 @@ services:
     depends_on:
       - db
       - redis
+      - mailserver
     networks:
       - proxy-tier
       - default
@@ -224,57 +302,22 @@ services:
 
   cloudflare-ddns:
     container_name: cloudflare-ddns
+    restart: always  
     environment:
       - API_KEY=1O0DEillqBQ2LqT-9TBnVBCO5ZJmATC_bwZiEKs-
       - ZONE=qloudserver.es
       - SUBDOMAIN=mail
     image: oznu/cloudflare-ddns
 
-  mailserver:
-    image: ghcr.io/docker-mailserver/docker-mailserver:latest
-    container_name: mailserver
-    # Provide the FQDN of your mail server here (Your DNS MX record should point to this value)
-    hostname: mail.qloudserver.es
-    environment:
-      # SSL_TYPE:         Uses the `letsencrypt` method to find mounted certificates.
-      # VIRTUAL_HOST:     The FQDN that `nginx-proxy` will configure itself to handle for HTTP[S] connections.
-      # LETSENCRYPT_HOST: The FQDN for a certificate that `acme-companion` will provision and renew.
-      - SSL_TYPE=letsencrypt
-      - VIRTUAL_HOST=mail.qloudserver.es
-      - LETSENCRYPT_HOST=mail.qloudserver.es    
-    env_file: mailserver.env
-    # More information about the mail-server ports:
-    # https://docker-mailserver.github.io/docker-mailserver/latest/config/security/understanding-the-ports/
-    # To avoid conflicts with yaml base-60 float, DO NOT remove the quotation marks.
-    ports:
-      - "25:25"    # SMTP  (explicit TLS => STARTTLS, Authentication is DISABLED => use port 465/587 instead)
-      - "143:143"  # IMAP4 (explicit TLS => STARTTLS)
-      - "465:465"  # ESMTP (implicit TLS)
-      - "587:587"  # ESMTP (explicit TLS => STARTTLS)
-      - "993:993"  # IMAP4 (implicit TLS)
-    volumes:
-      - dms-mail-data:/var/mail/
-      - dms-mail-state:/var/mail-state/
-      - dms-mail-logs:/var/log/mail/
-      - dms-config:/tmp/docker-mailserver/
-      - /etc/localtime:/etc/localtime:ro
-      - proxy-certs:/etc/letsencrypt/live/:ro
-    networks:
-      - proxy-tier
-    restart: always
-    stop_grace_period: 1m
-    # Uncomment if using `ENABLE_FAIL2BAN=1`:
-    # cap_add:
-    #   - NET_ADMIN
-    healthcheck:
-      test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
-      timeout: 3s
-      retries: 0
-
 volumes:
   openldap-certificates:
   openldap-slapd-database:
   openldap-slapd-config:
+  phpldapadmin-data:  
+  dms-mail-data:
+  dms-mail-state:
+  dms-mail-logs:
+  dms-config:
   nextcloud-db:
   nextcloud-data:
   proxy-certs:
@@ -284,10 +327,6 @@ volumes:
   redis-data:
     driver: local
   coturn-data:
-  dms-mail-data:
-  dms-mail-state:
-  dms-mail-logs:
-  dms-config:
 
 networks:
   proxy-tier:
