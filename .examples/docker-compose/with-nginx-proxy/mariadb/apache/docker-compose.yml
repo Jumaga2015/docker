@@ -11,8 +11,7 @@ services:
       - MYSQL_ROOT_PASSWORD=QCorporation#3
       - MARIADB_AUTO_UPGRADE=1
       - MARIADB_DISABLE_UPGRADE_BACKUP=1
-    env_file:
-      - db.env
+    env_file: ./db/db.env  
 
   # crear este fichero en el sistema host con root.
   # echo "vm.overcommit_memory = 1" > /etc/sysctl.d/10-overcommit.conf
@@ -52,6 +51,8 @@ services:
       - LDAP_READONLY_USER=true
       - LDAP_READONLY_USER_USERNAME=user-ro
       - LDAP_READONLY_USER_PASSWORD=qloud
+
+      - LDAP_LOG_LEVEL=0
     networks:
       - proxy-tier
       - openldap
@@ -107,7 +108,9 @@ services:
       - openldap
 
   mailserver:
-    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    build:
+      context: ./mailserver
+      dockerfile: Dockerfile
     container_name: mailserver
     restart: always
     # Provide the FQDN of your mail server here (Your DNS MX record should point to this value)
@@ -121,7 +124,7 @@ services:
       - LETSENCRYPT_HOST=mail.qloudserver.es    
 
       # >>> Postfix LDAP Integration
-      - LDAP_START_TLS=yes
+      - LDAP_START_TLS=no
       - ACCOUNT_PROVISIONER=LDAP
       - LDAP_SERVER_HOST=ldaps://openldap:636
       - LDAP_BIND_DN=cn=admin,dc=qloudserver,dc=es
@@ -134,23 +137,37 @@ services:
       - LDAP_QUERY_FILTER_GROUP=(&(objectClass=inetOrgPerson)(mailGroupMember=%s))
       - LDAP_QUERY_FILTER_SENDERS=(&(objectClass=inetOrgPerson)(|(mail=%s)(mailAlias=%s)(mailGroupMember=%s)))
       - SPOOF_PROTECTION=1
-      #test command: postmap -q qloudserver.es ldap:/etc/postfix/ldap-domains.cf
+      # cmdtest: postmap -q qloudserver.es ldap:/etc/postfix/ldap-domains.cf
+      # <<< Postfix LDAP Integration
 
       # >>> Dovecot LDAP Integration
-      - DOVECOT_TLS=yes
-      - DOVECOT_AUTH_BIND=no
-      
-      - DOVECOT_USER_FILTER=(&(objectClass=inetOrgPerson)(mail=%u))
+      - DOVECOT_TLS=no
+      - DOVECOT_TLS_REQCERT=never
+      - DOVECOT_AUTH_BIND=yes
+      #- DOVECOT_AUTH_BIND_USERDN=cn=%u,ou=people,dc=qloudserver,dc=es
+
+      - DOVECOT_USER_FILTER=(&(objectClass=inetOrgPerson)(mail=%u@qloudserver.es))
+      - DOVECOT_PASS_FILTER=(&(objectClass=inetOrgPerson)(mail=%u))
       - DOVECOT_PASS_ATTRS=uid=user,userPassword=password
       - DOVECOT_USER_ATTRS==home=/var/mail/%{ldap:uid},=mail=maildir:~/Maildir,uidNumber=uid,gidNumber=gid
+      # cmdtest: doveadm auth test admin-ldap@qloudserver.es qloudqloudqloud
+      # cmdtest: doveadm auth lookup admin-ldap@qloudserver.es
+      # cmdtest: doveadm auth login admin-ldap@qloudserver.es qloudqloudqloud
+      # <<< Dovecot LDAP Integration
 
       # >>> SASL LDAP Authentication
-      - SASLAUTHD_LDAP_START_TLS=yes
-      - ENABLE_SASLAUTHD=1
-      - SASLAUTHD_MECHANISMS=ldap
+      - SASLAUTHD_LDAP_START_TLS=no
+      - ENABLE_SASLAUTHD=0
+      - SASLAUTHD_LDAP_SERVER=openldap.qloudserver.es
+      - SASLAUTHD_LDAP_PROTO=
+      - SASLAUTHD_LDAP_BIND_DN=cn=admin,dc=qloudserver,dc=es
+      - SASLAUTHD_LDAP_PASSWORD=qloud
+      - SASLAUTHD_LDAP_SEARCH_BASE=ou=people,dc=qloudserver,dc=es
       - SASLAUTHD_LDAP_FILTER=(&(mail=%U@qloudserver.es)(objectClass=inetOrgPerson))
+      - SASLAUTHD_MECHANISMS=ldap
+      # <<< SASL LDAP Authentication
 
-    env_file: mailserver.env
+    env_file: ./mailserver/mailserver.env
     # More information about the mail-server ports:
     # https://docker-mailserver.github.io/docker-mailserver/latest/config/security/understanding-the-ports/
     # To avoid conflicts with yaml base-60 float, DO NOT remove the quotation marks.
@@ -198,8 +215,7 @@ services:
       - OVERWRITECLIURL=https://nextqloud.qloudserver.es
       - OVERWRITEPROTOCOL=https
       - OVERWRITEHOST=nextqloud.qloudserver.es  
-    env_file:
-      - db.env
+    env_file: ./db/db.env
     depends_on:
       - db
       - redis
