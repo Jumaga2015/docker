@@ -138,15 +138,16 @@ services:
       - LDAP_QUERY_FILTER_SENDERS=(&(objectClass=inetOrgPerson)(|(mail=%s)(mailAlias=%s)(mailGroupMember=%s)))
       - SPOOF_PROTECTION=1
       # cmdtest: postmap -q qloudserver.es ldap:/etc/postfix/ldap-domains.cf
+      # cmdtest: postmap -q admin-ldap@qloudserver.es ldap:/etc/postfix/ldap-users.cf
       # <<< Postfix LDAP Integration
 
       # >>> Dovecot LDAP Integration
       - DOVECOT_TLS=no
       - DOVECOT_TLS_REQCERT=never
-      - DOVECOT_AUTH_BIND=yes
+      - DOVECOT_AUTH_BIND=no
       #- DOVECOT_AUTH_BIND_USERDN=cn=%u,ou=people,dc=qloudserver,dc=es
 
-      - DOVECOT_USER_FILTER=(&(objectClass=inetOrgPerson)(mail=%u@qloudserver.es))
+      - DOVECOT_USER_FILTER=(&(objectClass=inetOrgPerson)(userid=%n))
       - DOVECOT_PASS_FILTER=(&(objectClass=inetOrgPerson)(mail=%u))
       - DOVECOT_PASS_ATTRS=uid=user,userPassword=password
       - DOVECOT_USER_ATTRS==home=/var/mail/%{ldap:uid},=mail=maildir:~/Maildir,uidNumber=uid,gidNumber=gid
