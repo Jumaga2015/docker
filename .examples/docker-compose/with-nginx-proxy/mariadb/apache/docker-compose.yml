@@ -52,7 +52,7 @@ services:
       - LDAP_READONLY_USER_USERNAME=user-ro
       - LDAP_READONLY_USER_PASSWORD=qloud
 
-      - LDAP_LOG_LEVEL=0
+      #- LDAP_LOG_LEVEL=0
     networks:
       - proxy-tier
       - openldap
