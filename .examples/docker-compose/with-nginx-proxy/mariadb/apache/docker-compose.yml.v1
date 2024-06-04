@@ -1,5 +1,27 @@
 services:
 
+  db:
+    image: mariadb:10.6
+    container_name: mariadb
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    restart: always
+    volumes:
+      - nextcloud-db:/var/lib/mysql:Z
+    environment:
+      - MYSQL_ROOT_PASSWORD=QCorporation#3
+      - MARIADB_AUTO_UPGRADE=1
+      - MARIADB_DISABLE_UPGRADE_BACKUP=1
+    env_file: ./db/db.env  
+
+  # crear este fichero en el sistema host con root.
+  # echo "vm.overcommit_memory = 1" > /etc/sysctl.d/10-overcommit.conf
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    volumes:
+      - redis-data:/data
+
   openldap:
     image: osixia/openldap:latest
     container_name: openldap
@@ -30,10 +52,9 @@ services:
       - LDAP_READONLY_USER_USERNAME=user-ro
       - LDAP_READONLY_USER_PASSWORD=qloud
 
-      - LDAP_RFC2307BIS_SCHEMA=true
-
       #- LDAP_LOG_LEVEL=0
     networks:
+      - proxy-tier
       - openldap
   
   phpldapadmin:
@@ -77,8 +98,6 @@ services:
       - LDAP_ADMINS_GROUP=admins
       - LDAP_ADMIN_BIND_DN=cn=admin,dc=qloudserver,dc=es
       - LDAP_ADMIN_BIND_PWD=qloud
-
-      #- FORCE_RFC2307BIS=TRUE
 
       - LDAP_REQUIRE_STARTTLS=TRUE
       - LDAP_IGNORE_CERT_ERRORS=TRUE
@@ -181,36 +200,45 @@ services:
     networks:
       - proxy-tier
 
+
   nextcloud:
-    init: true
-    image: nextcloud/all-in-one:latest
-    container_name: nextcloud-aio-mastercontainer
+    image: nextcloud:apache
+    container_name: nextcloud
     restart: always
-    #hostname: nextqloud.qloudserver.es
-    ports:
-      - 8080:8080    
-    expose:
-      - "80"
+    hostname: nextqloud.qloudserver.es
     volumes:
-      - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nextcloud-data:/var/www/html:z
     environment:
       - VIRTUAL_HOST=nextqloud.qloudserver.es
       - LETSENCRYPT_HOST=nextqloud.qloudserver.es
       - LETSENCRYPT_EMAIL=jumaga2015@gmail.com
 
-      - APACHE_PORT=80
-      - APACHE_IP_BINDING=0.0.0.0
+      - MYSQL_HOST=db
+      - REDIS_HOST=redis
 
-      #- TRUSTED_PROXIES=proxy
-      #- OVERWRITECLIURL=https://nextqloud.qloudserver.es
-      #- OVERWRITEPROTOCOL=https
-      #- OVERWRITEHOST=nextqloud.qloudserver.es  
+      - TRUSTED_PROXIES=proxy
+      - OVERWRITECLIURL=https://nextqloud.qloudserver.es
+      - OVERWRITEPROTOCOL=https
+      - OVERWRITEHOST=nextqloud.qloudserver.es  
+    env_file: ./db/db.env
     depends_on:
+      - db
+      - redis
       - mailserver
     networks:
-      - nextcloud-aio 
       - proxy-tier
+      - default
+
+  cron:
+    image: nextcloud:apache
+    container_name: nextcloud-cron
+    restart: always
+    volumes:
+      - nextcloud-data:/var/www/html:z
+    entrypoint: /cron.sh
+    depends_on:
+      - db
+      - redis
 
   proxy:
     build: ./proxy
@@ -231,7 +259,7 @@ services:
     networks:
       - proxy-tier
 
-  letsencrypt:
+  letsencrypt-companion:
     image: nginxproxy/acme-companion
     container_name: letsencrypt
     restart: always
@@ -246,6 +274,61 @@ services:
     depends_on:
       - proxy
 
+# self signed
+#  omgwtfssl:
+#    image: paulczar/omgwtfssl
+#    restart: "no"
+#    volumes:
+#      - certs:/certs
+#    environment:
+#      - SSL_SUBJECT=servhostname.local
+#      - CA_SUBJECT=my@example.com
+#      - SSL_KEY=/certs/servhostname.local.key
+#      - SSL_CSR=/certs/servhostname.local.csr
+#      - SSL_CERT=/certs/servhostname.local.crt
+#    networks:
+#      - proxy-tier
+
+  collabora:
+    image: collabora/code
+    container_name: collabora
+    restart: always
+    networks:
+      - proxy-tier
+    depends_on:
+      - proxy
+    cap_add:
+     - MKNOD
+    ports:
+      - 127.0.0.1:9980:9980
+    environment:
+      # IMPORTANT: Note the backslashs before the dots here (and only here)!
+      - domain=nextqloud.qloudserver.es
+      - username=admin
+      - password=QCorporation#3
+      - VIRTUAL_HOST=officeqloud.qloudserver.es
+      - LETSENCRYPT_HOST=officeqloud.qloudserver.es
+      - VIRTUAL_NETWORK=proxy-tier
+      - VIRTUAL_PORT=9980
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true
+    #En nextcloud configuración office, poner este host <https://officeqloud.qloudserver.es>
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    restart: always  
+    ports:
+      - 3478:3478
+      - 3478:3478/udp
+      - 5349:5349
+      - 5349:5349/udp
+      - 49100-49200:49100-49200/udp
+    volumes:
+      - coturn-data:/var/lib/coturn
+    command: --log-file=stdout --realm=nextqloud.qloudserver.es --min-port=49100 --max-port=49200 --fingerprint --stale-nonce --no-multicast-peers --use-auth-secret --static-auth-secret=26c10e36382f904ec6aa03eb33ebe0a0d09ef6b5bdc7ca080459e83e1a962699 --no-cli --no-tlsv1 --no-tlsv1_1 --total-quota=100
+    depends_on:
+      - redis
+
   cloudflare-ddns:
     container_name: cloudflare-ddns
     restart: always  
@@ -257,51 +340,24 @@ services:
 
 volumes:
   openldap-certificates:
-    name: openldap-certificates
   openldap-slapd-database:
-    external: false
-    name: openldap-slapd-database
   openldap-slapd-config:
-    external: false
-    name: openldap-slapd-config
-  phpldapadmin-data:
-    external: false
-    name: phpldapadmin-data
+  phpldapadmin-data:  
   dms-mail-data:
-    external: false
-    name: dms-mail-data
   dms-mail-state:
-    external: false
-    name: dms-mail-state
   dms-mail-logs:
-    external: false
-    name: dms-mail-logs
   dms-config:
-    external: false
-    name: dms-config
+  nextcloud-db:
+  nextcloud-data:
   proxy-certs:
-    external: false
-    name: proxy-certs
   proxy-vhost.d:
-    external: false
-    name: proxy-vhost.d
   proxy-html:
-    external: false
-    name: proxy-html
   letsencrypt:
-    external: false
-    name: letsencrypt
-  nextcloud_aio_mastercontainer:
-    external: false
-    name: nextcloud_aio_mastercontainer
+  redis-data:
+    driver: local
+  coturn-data:
 
 networks:
   proxy-tier:
-    name: proxy-tier
   openldap:
     driver: bridge
-    name: openldap
-  nextcloud-aio:  
-    name: nextcloud-aio
-
-#flaring freeload nimble hypertext dreamt preschool anything mantra
